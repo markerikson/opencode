@@ -13,6 +13,18 @@ import z from "zod"
 export namespace PermissionNext {
   const log = Log.create({ service: "permission" })
 
+  // Exposed for testing - allows mocking the plugin trigger
+  export let _triggerPluginHook: typeof triggerPluginHook | null = null
+
+  async function triggerPluginHook(
+    info: Request,
+  ): Promise<{ status: "ask" | "allow" | "deny" }> {
+    const { Plugin } = await import("@/plugin")
+    return Plugin.trigger("permission.ask", info as any, {
+      status: "ask" as "ask" | "deny" | "allow",
+    })
+  }
+
   function expand(pattern: string): string {
     if (pattern.startsWith("~/")) return os.homedir() + pattern.slice(1)
     if (pattern === "~") return os.homedir()
@@ -138,11 +150,25 @@ export namespace PermissionNext {
           throw new DeniedError(ruleset.filter((r) => Wildcard.match(request.permission, r.permission)))
         if (rule.action === "ask") {
           const id = input.id ?? Identifier.ascending("permission")
+          const info: Request = {
+            id,
+            ...request,
+          }
+
+          // let plugins auto-approve/deny before prompting user
+          // use dynamic import to avoid circular dependency and allow lazy loading
+          try {
+            const trigger = _triggerPluginHook ?? triggerPluginHook
+            const result = await trigger(info)
+            if (result.status === "allow") return
+            if (result.status === "deny")
+              throw new DeniedError(ruleset.filter((r) => Wildcard.match(request.permission, r.permission)))
+          } catch (e) {
+            if (e instanceof DeniedError) throw e
+            log.warn("plugin permission.ask hook failed, falling through to user prompt", { error: e })
+          }
+
           return new Promise<void>((resolve, reject) => {
-            const info: Request = {
-              id,
-              ...request,
-            }
             s.pending[id] = {
               info,
               resolve,

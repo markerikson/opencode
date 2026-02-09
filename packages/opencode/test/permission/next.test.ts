@@ -1,9 +1,30 @@
-import { test, expect } from "bun:test"
+import { test, expect, beforeEach, afterEach } from "bun:test"
 import os from "os"
 import { PermissionNext } from "../../src/permission/next"
 import { Instance } from "../../src/project/instance"
-import { Storage } from "../../src/storage/storage"
 import { tmpdir } from "../fixture/fixture"
+
+// Bypass the real Plugin.trigger call in tests to avoid server dependencies
+// The actual plugin hook behavior is tested in next-plugin-hook.test.ts
+beforeEach(() => {
+  PermissionNext._triggerPluginHook = async () => ({ status: "ask" })
+})
+
+afterEach(() => {
+  PermissionNext._triggerPluginHook = null
+})
+
+// Helper to wait for a permission request to appear in pending
+// Needed because ask() is async and sets up pending after the plugin hook
+async function waitForPending(requestID: string, timeoutMs = 1000): Promise<void> {
+  const start = Date.now()
+  while (Date.now() - start < timeoutMs) {
+    const pending = await PermissionNext.list()
+    if (pending.some((p) => p.id === requestID)) return
+    await new Promise((r) => setTimeout(r, 10))
+  }
+  throw new Error(`Timed out waiting for pending request ${requestID}`)
+}
 
 // fromConfig tests
 
@@ -531,6 +552,8 @@ test("reply - once resolves the pending ask", async () => {
         ruleset: [],
       })
 
+      await waitForPending("permission_test1")
+
       await PermissionNext.reply({
         requestID: "permission_test1",
         reply: "once",
@@ -556,6 +579,8 @@ test("reply - reject throws RejectedError", async () => {
         ruleset: [],
       })
 
+      await waitForPending("permission_test2")
+
       await PermissionNext.reply({
         requestID: "permission_test2",
         reply: "reject",
@@ -580,6 +605,8 @@ test("reply - always persists approval and resolves", async () => {
         always: ["ls"],
         ruleset: [],
       })
+
+      await waitForPending("permission_test3")
 
       await PermissionNext.reply({
         requestID: "permission_test3",
@@ -636,6 +663,10 @@ test("reply - reject cancels all pending for same session", async () => {
       const result1 = askPromise1.catch((e) => e)
       const result2 = askPromise2.catch((e) => e)
 
+      // Wait for both requests to be pending
+      await waitForPending("permission_test4a")
+      await waitForPending("permission_test4b")
+
       // Reject the first one
       await PermissionNext.reply({
         requestID: "permission_test4a",
@@ -688,3 +719,6 @@ test("ask - allows all patterns when all match allow rules", async () => {
     },
   })
 })
+
+// Plugin hook tests are in next-plugin-hook.test.ts
+// They use PermissionNext._triggerPluginHook override for mocking
