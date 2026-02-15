@@ -21,15 +21,22 @@ export namespace FileTime {
     }
   })
 
+  // Normalize path separators to forward slashes for consistent lookup
+  // (Windows paths may use backslashes, but we want consistent keys)
+  function normalizePath(filepath: string): string {
+    return filepath.replace(/\\/g, "/")
+  }
+
   export function read(sessionID: string, file: string) {
-    log.info("read", { sessionID, file })
+    const normalized = normalizePath(file)
+    log.info("read", { sessionID, file: normalized })
     const { read } = state()
     read[sessionID] = read[sessionID] || {}
-    read[sessionID][file] = new Date()
+    read[sessionID][normalized] = new Date()
   }
 
   export function get(sessionID: string, file: string) {
-    return state().read[sessionID]?.[file]
+    return state().read[sessionID]?.[normalizePath(file)]
   }
 
   export async function withLock<T>(filepath: string, fn: () => Promise<T>): Promise<T> {
