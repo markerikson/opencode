@@ -12,6 +12,7 @@ import { Session } from "../session"
 import { NamedError } from "@opencode-ai/util/error"
 import { CopilotAuthPlugin } from "./copilot"
 import { gitlabAuthPlugin as GitlabAuthPlugin } from "@gitlab/opencode-gitlab-auth"
+import { FileTime } from "../file/time"
 
 export namespace Plugin {
   const log = Log.create({ service: "plugin" })
@@ -37,6 +38,10 @@ export namespace Plugin {
       directory: Instance.directory,
       serverUrl: Server.url(),
       $: Bun.$,
+      fileTime: {
+        read: FileTime.read,
+        get: FileTime.get,
+      },
     }
 
     for (const plugin of INTERNAL_PLUGINS) {

@@ -30,6 +30,11 @@ export type PluginInput = {
   worktree: string
   serverUrl: URL
   $: BunShell
+  /** Register a file as "read" for edit-time assertions (FileTime bridge). */
+  fileTime?: {
+    read(sessionID: string, file: string): void
+    get(sessionID: string, file: string): Date | undefined
+  }
 }
 
 export type Plugin = (input: PluginInput) => Promise<Hooks>
