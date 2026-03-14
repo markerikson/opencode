@@ -15,6 +15,7 @@ import { InstanceState } from "@/effect/instance-state"
 import { makeRuntime } from "@/effect/run-service"
 import { errorMessage } from "@/util/error"
 import { Installation } from "@/installation"
+import { FileTime } from "../file/time"
 import {
   checkPluginCompatibility,
   getDefaultPlugin,
@@ -204,6 +205,10 @@ export namespace Plugin {
               return Server.url ?? new URL("http://localhost:4096")
             },
             $: Bun.$,
+            fileTime: {
+              read: FileTime.read,
+              get: FileTime.get,
+            },
           }
 
           for (const plugin of INTERNAL_PLUGINS) {
