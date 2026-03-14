@@ -18,6 +18,7 @@ import { makeRuntime } from "@/effect/run-service"
 import { errorMessage } from "@/util/error"
 import { PluginLoader } from "./loader"
 import { parsePluginSpecifier, readPluginId, readV1Plugin, resolvePluginId } from "./shared"
+import { FileTime } from "../file/time"
 
 export namespace Plugin {
   const log = Log.create({ service: "plugin" })
@@ -137,6 +138,10 @@ export namespace Plugin {
             },
             // @ts-expect-error
             $: typeof Bun === "undefined" ? undefined : Bun.$,
+            fileTime: {
+              read: FileTime.read,
+              get: FileTime.get,
+            },
           }
 
           for (const plugin of INTERNAL_PLUGINS) {

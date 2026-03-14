@@ -31,6 +31,10 @@ export type PluginInput = {
   worktree: string
   serverUrl: URL
   $: BunShell
+  fileTime?: {
+    read(sessionID: string, file: string): void
+    get(sessionID: string, file: string): Date | undefined
+  }
 }
 
 export type PluginOptions = Record<string, unknown>
