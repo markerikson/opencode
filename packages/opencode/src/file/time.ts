@@ -50,6 +50,12 @@ export namespace FileTime {
 
   export class Service extends ServiceMap.Service<Service, Interface>()("@opencode/FileTime") {}
 
+  // Normalize path separators to forward slashes for consistent lookup
+  // (Windows paths may use backslashes, but we want consistent keys)
+  function normalizePath(filepath: string): string {
+    return filepath.replace(/\\/g, "/")
+  }
+
   export const layer = Layer.effect(
     Service,
     Effect.gen(function* () {
@@ -65,43 +71,50 @@ export namespace FileTime {
 
       const getLock = Effect.fn("FileTime.lock")(function* (filepath: string) {
         const locks = (yield* InstanceState.get(state)).locks
-        const lock = locks.get(filepath)
+        const normalizedPath = normalizePath(filepath)
+        const lock = locks.get(normalizedPath)
         if (lock) return lock
 
         const next = Semaphore.makeUnsafe(1)
-        locks.set(filepath, next)
+        locks.set(normalizedPath, next)
         return next
       })
 
       const read = Effect.fn("FileTime.read")(function* (sessionID: SessionID, file: string) {
         const reads = (yield* InstanceState.get(state)).reads
-        log.info("read", { sessionID, file })
-        session(reads, sessionID).set(file, yield* stamp(file))
+        const normalizedPath = normalizePath(file)
+        log.info("read", { sessionID, file: normalizedPath })
+        session(reads, sessionID).set(file, yield* stamp(normalizedPath))
       })
 
       const get = Effect.fn("FileTime.get")(function* (sessionID: SessionID, file: string) {
         const reads = (yield* InstanceState.get(state)).reads
-        return reads.get(sessionID)?.get(file)?.read
+        const normalizedPath = normalizePath(file)
+        return reads.get(sessionID)?.get(normalizedPath)?.read
       })
 
       const assert = Effect.fn("FileTime.assert")(function* (sessionID: SessionID, filepath: string) {
         if (disableCheck) return
 
         const reads = (yield* InstanceState.get(state)).reads
-        const time = reads.get(sessionID)?.get(filepath)
-        if (!time) throw new Error(`You must read file ${filepath} before overwriting it. Use the Read tool first`)
 
-        const next = yield* stamp(filepath)
+        const normalizedPath = normalizePath(filepath)
+        const time = reads.get(sessionID)?.get(normalizedPath)
+        if (!time)
+          throw new Error(`You must read file ${normalizedPath} before overwriting it. Use the Read tool first`)
+
+        const next = yield* stamp(normalizedPath)
         const changed = next.mtime !== time.mtime || next.ctime !== time.ctime || next.size !== time.size
         if (!changed) return
 
         throw new Error(
-          `File ${filepath} has been modified since it was last read.\nLast modification: ${new Date(next.mtime ?? next.read.getTime()).toISOString()}\nLast read: ${time.read.toISOString()}\n\nPlease read the file again before modifying it.`,
+          `File ${normalizedPath} has been modified since it was last read.\nLast modification: ${new Date(next.mtime ?? next.read.getTime()).toISOString()}\nLast read: ${time.read.toISOString()}\n\nPlease read the file again before modifying it.`,
         )
       })
 
       const withLock = Effect.fn("FileTime.withLock")(function* <T>(filepath: string, fn: () => Promise<T>) {
-        return yield* Effect.promise(fn).pipe((yield* getLock(filepath)).withPermits(1))
+        const normalizedPath = normalizePath(filepath)
+        return yield* Effect.promise(fn).pipe((yield* getLock(normalizedPath)).withPermits(1))
       })
 
       return Service.of({ read, get, assert, withLock })
