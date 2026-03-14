@@ -8,6 +8,7 @@ import { Instance } from "@/project/instance"
 import { MessageID, SessionID } from "@/session/schema"
 import { PermissionTable } from "@/session/session.sql"
 import { Database, eq } from "@/storage/db"
+import type { Plugin as PluginModule } from "@/plugin"
 import { Log } from "@/util/log"
 import { Wildcard } from "@/util/wildcard"
 import { Deferred, Effect, Layer, Schema, Context } from "effect"
@@ -135,6 +136,18 @@ export namespace Permission {
     return evalRule(permission, pattern, ...rulesets)
   }
 
+  async function triggerPluginHook(
+    info: Request,
+    output: { status: Action; message?: string },
+  ): Promise<{ status: Action; message?: string }> {
+    // @ts-ignore
+    const { Plugin } = (await import("@/plugin")) as typeof PluginModule
+    return Plugin.trigger("permission.ask", info, output)
+  }
+
+  // Exported for test mocking — override to bypass or simulate plugin behavior
+  export let _triggerPluginHook = triggerPluginHook
+
   export class Service extends Context.Service<Service, Interface>()("@opencode/Permission") {}
 
   export const layer = Layer.effect(
@@ -189,6 +202,24 @@ export namespace Permission {
           ...request,
         }
         log.info("asking", { id, permission: info.permission, patterns: info.patterns })
+
+        // Allow plugins to auto-approve or deny before prompting the user
+        const hook = yield* Effect.tryPromise(() =>
+          _triggerPluginHook(info, {
+            status: "ask" as "ask" | "deny" | "allow",
+            message: undefined as string | undefined,
+          }),
+        ).pipe(
+          Effect.catch((err) => {
+            log.warn("permission.ask hook failed", { error: err })
+            return Effect.succeed({ status: "ask" as const, message: undefined })
+          }),
+        )
+        if (hook.status === "deny")
+          return yield* (hook.message ? new CorrectedError({ feedback: hook.message }) : new DeniedError({
+            ruleset: ruleset.filter((rule) => Wildcard.match(request.permission, rule.permission)),
+          }))
+        if (hook.status === "allow") return
 
         const deferred = yield* Deferred.make<void, RejectedError | CorrectedError>()
         pending.set(id, { info, deferred })

@@ -1,4 +1,4 @@
-import { afterEach, test, expect } from "bun:test"
+import { afterEach, beforeEach, test, expect } from "bun:test"
 import os from "os"
 import { Bus } from "../../src/bus"
 import { Permission } from "../../src/permission"
@@ -7,7 +7,14 @@ import { Instance } from "../../src/project/instance"
 import { tmpdir } from "../fixture/fixture"
 import { MessageID, SessionID } from "../../src/session/schema"
 
+// Override the plugin hook to be a passthrough for all tests in this file,
+// so plugin behavior doesn't interfere with core permission tests.
+const originalTrigger = Permission._triggerPluginHook
+beforeEach(() => {
+  Permission._triggerPluginHook = async (_info, output) => output
+})
 afterEach(async () => {
+  Permission._triggerPluginHook = originalTrigger
   await Instance.disposeAll()
 })
 
@@ -530,7 +537,8 @@ test("ask - returns pending promise when action is ask", async () => {
       })
       // Promise should be pending, not resolved
       expect(promise).toBeInstanceOf(Promise)
-      // Don't await - just verify it returns a promise
+      // Wait for async plugin hook to complete before rejecting
+      await waitForPending(1)
       await rejectAll()
       await promise.catch(() => {})
     },
@@ -555,7 +563,7 @@ test("ask - adds request to pending list", async () => {
         ruleset: [],
       })
 
-      const list = await Permission.list()
+      const list = await waitForPending(1)
       expect(list).toHaveLength(1)
       expect(list[0]).toMatchObject({
         sessionID: SessionID.make("session_test"),
@@ -598,7 +606,7 @@ test("ask - publishes asked event", async () => {
         ruleset: [],
       })
 
-      expect(await Permission.list()).toHaveLength(1)
+      expect(await waitForPending(1)).toHaveLength(1)
       expect(seen).toBeDefined()
       expect(seen).toMatchObject({
         sessionID: SessionID.make("session_test"),
