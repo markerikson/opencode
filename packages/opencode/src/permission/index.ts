@@ -137,6 +137,7 @@ export namespace Permission {
   }
 
   async function triggerPluginHook(info: Request, output: { status: Action }): Promise<{ status: Action }> {
+    // @ts-ignore
     const { Plugin } = (await import("@/plugin")) as typeof PluginModule
     return Plugin.trigger("permission.ask", info, output)
   }
