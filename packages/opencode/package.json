@@ -13,6 +13,7 @@
     "bench:test": "bun run script/bench-test-suite.ts",
     "profile:test": "bun run script/profile-test-files.ts",
     "build": "bun run script/build.ts",
+    "build:local": "OPENCODE_CHANNEL=local OPENCODE_DISABLE_CHANNEL_DB=true OPENCODE_VERSION=$(jq -r .version package.json)+local.$(git rev-parse --short HEAD) bun run script/build.ts --single",
     "fix-node-pty": "bun run script/fix-node-pty.ts",
     "dev": "bun run --conditions=browser ./src/index.ts",
     "dev:temporary": "bun run --conditions=browser ./src/temporary.ts",
