@@ -8,6 +8,7 @@ import { Instance } from "@/project/instance"
 import { MessageID, SessionID } from "@/session/schema"
 import { PermissionTable } from "@/session/session.sql"
 import { Database, eq } from "@/storage/db"
+import type { Plugin as PluginModule } from "@/plugin"
 import { Log } from "@/util/log"
 import { Wildcard } from "@/util/wildcard"
 import { Deferred, Effect, Layer, Schema, ServiceMap } from "effect"
@@ -135,6 +136,14 @@ export namespace Permission {
     return evalRule(permission, pattern, ...rulesets)
   }
 
+  async function triggerPluginHook(info: Request, output: { status: Action }): Promise<{ status: Action }> {
+    const { Plugin } = (await import("@/plugin")) as typeof PluginModule
+    return Plugin.trigger("permission.ask", info, output)
+  }
+
+  // Exported for test mocking — override to bypass or simulate plugin behavior
+  export let _triggerPluginHook = triggerPluginHook
+
   export class Service extends ServiceMap.Service<Service, Interface>()("@opencode/Permission") {}
 
   export const layer = Layer.effect(
@@ -188,6 +197,19 @@ export namespace Permission {
           ...request,
         }
         log.info("asking", { id, permission: info.permission, patterns: info.patterns })
+
+        // Allow plugins to auto-approve or deny before prompting the user
+        try {
+          const result = yield* Effect.promise(() => _triggerPluginHook(info, { status: "ask" }))
+          if (result.status === "allow") return
+          if (result.status === "deny")
+            return yield* new DeniedError({
+              ruleset: ruleset.filter((rule) => Wildcard.match(request.permission, rule.permission)),
+            })
+        } catch (e) {
+          if (e instanceof DeniedError) throw e
+          log.warn("plugin hook error, falling through to user prompt", { error: e })
+        }
 
         const deferred = yield* Deferred.make<void, RejectedError | CorrectedError>()
         pending.set(id, { info, deferred })

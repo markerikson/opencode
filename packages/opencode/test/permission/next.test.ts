@@ -1,4 +1,4 @@
-import { afterEach, test, expect } from "bun:test"
+import { afterEach, beforeEach, test, expect } from "bun:test"
 import os from "os"
 import { Bus } from "../../src/bus"
 import { Permission } from "../../src/permission"
@@ -7,7 +7,14 @@ import { Instance } from "../../src/project/instance"
 import { tmpdir } from "../fixture/fixture"
 import { MessageID, SessionID } from "../../src/session/schema"
 
+// Override the plugin hook to be a passthrough for all tests in this file,
+// so plugin behavior doesn't interfere with core permission tests.
+const originalTrigger = Permission._triggerPluginHook
+beforeEach(() => {
+  Permission._triggerPluginHook = async (_info, output) => output
+})
 afterEach(async () => {
+  Permission._triggerPluginHook = originalTrigger
   await Instance.disposeAll()
 })
 
