@@ -13,6 +13,7 @@ import { Deferred, Effect, Layer, Schema, Context } from "effect"
 import os from "os"
 import { evaluate as evalRule } from "./evaluate"
 import { PermissionID } from "./schema"
+import type { Plugin as PluginModule } from "@/plugin"
 
 const log = Log.create({ service: "permission" })
 
@@ -129,6 +130,43 @@ export function evaluate(permission: string, pattern: string, ...rulesets: Rules
   return evalRule(permission, pattern, ...rulesets)
 }
 
+function triggerPluginHookImpl(
+  info: Request,
+  output: { status: Action; message?: string },
+) {
+  return Effect.gen(function* () {
+    // Dynamic import to avoid circular dependency with Plugin module
+    const mod: typeof PluginModule = yield* Effect.promise(() =>
+      // @ts-ignore
+      import("@/plugin"),
+    )
+    const plugin = yield* mod.Plugin.Service
+    return yield* plugin.trigger("permission.ask", info, output)
+  })
+}
+
+// Exported for test mocking — override .fn to bypass or simulate plugin behavior.
+// The call site wraps this with catch/catchDefect, so mocks can return Effect.fail()
+// to test error fallthrough.
+export const _triggerPluginHook = { fn: triggerPluginHookImpl }
+
+function callPluginHook(
+  info: Request,
+  output: { status: Action; message?: string },
+): Effect.Effect<{ status: Action; message?: string }> {
+  const hookDefault = { status: "ask" as Action, message: undefined }
+  return (_triggerPluginHook.fn(info, output) as unknown as Effect.Effect<{ status: Action; message?: string }, unknown>).pipe(
+    Effect.catch((err) => {
+      log.warn("permission.ask hook failed", { error: err })
+      return Effect.succeed(hookDefault)
+    }),
+    Effect.catchDefect((defect) => {
+      log.warn("permission.ask hook defect", { error: defect })
+      return Effect.succeed(hookDefault)
+    }),
+  )
+}
+
 export class Service extends Context.Service<Service, Interface>()("@opencode/Permission") {}
 
 export const layer = Layer.effect(
@@ -183,6 +221,19 @@ export const layer = Layer.effect(
         ...request,
       })
       log.info("asking", { id, permission: info.permission, patterns: info.patterns })
+
+      // Allow plugins to auto-approve or deny before prompting the user
+      const hook = yield* callPluginHook(info, {
+        status: "ask" as Action,
+        message: undefined as string | undefined,
+      })
+      if (hook.status === "deny")
+        return yield* (hook.message
+          ? new CorrectedError({ feedback: hook.message })
+          : new DeniedError({
+              ruleset: ruleset.filter((rule) => Wildcard.match(request.permission, rule.permission)),
+            }))
+      if (hook.status === "allow") return
 
       const deferred = yield* Deferred.make<void, RejectedError | CorrectedError>()
       pending.set(id, { info, deferred })
