@@ -12,8 +12,9 @@
     "bench:test": "bun run script/bench-test-suite.ts",
     "profile:test": "bun run script/profile-test-files.ts",
     "build": "bun run script/build.ts",
-    "dev": "bun run ./src/index.ts",
-    "dev:temporary": "bun run ./src/temporary.ts"
+    "build:local": "OPENCODE_CHANNEL=local OPENCODE_VERSION=$(jq -r .version package.json)+local.$(git rev-parse --short HEAD) bun run script/build.ts --single",
+    "dev": "bun run --conditions=browser ./src/index.ts",
+    "dev:temporary": "bun run --conditions=browser ./src/temporary.ts"
   },
   "bin": {
     "opencode": "./bin/opencode"
