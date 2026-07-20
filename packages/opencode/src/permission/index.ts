@@ -6,8 +6,42 @@ import { Deferred, Effect, Layer, Context } from "effect"
 import os from "os"
 import { PermissionV1 } from "@opencode-ai/core/v1/permission"
 import { EventV2Bridge } from "@/event-v2-bridge"
+import { Plugin } from "@/plugin"
 
 export const Event = PermissionV1.Event
+
+// Plugin hook for permission.ask - allows plugins to auto-allow/deny permission requests
+type HookResult = { status: PermissionV1.Action }
+type HookFn = (
+  info: PermissionV1.AskInput,
+  output: HookResult,
+) => Effect.Effect<HookResult, any, any>
+
+function triggerPluginHookImpl(
+  info: PermissionV1.AskInput,
+  output: HookResult,
+) {
+  return Effect.gen(function* () {
+    const plugin = yield* Plugin.Service
+    const result = yield* plugin.trigger("permission.ask", info, output)
+    return result
+  })
+}
+
+// Exported for test mocking - replace .fn to override behavior in tests
+export const _triggerPluginHook: { fn: HookFn } = {
+  fn: triggerPluginHookImpl,
+}
+
+function callPluginHook(
+  info: PermissionV1.AskInput,
+  output: HookResult,
+): Effect.Effect<HookResult> {
+  return _triggerPluginHook.fn(info, output).pipe(
+    Effect.catchDefect(() => Effect.succeed({ status: "ask" as PermissionV1.Action })),
+    Effect.catch(() => Effect.succeed({ status: "ask" as PermissionV1.Action })),
+  ) as Effect.Effect<HookResult>
+}
 
 export interface Interface {
   readonly ask: (input: PermissionV1.AskInput) => Effect.Effect<void, PermissionV1.Error>
@@ -82,6 +116,19 @@ const layer = Layer.effect(
       }
 
       if (!needsAsk) return
+
+      // Trigger permission.ask plugin hook before prompting user
+      const hookResult = yield* callPluginHook(input, { status: "ask" })
+      if (hookResult.status === "allow") {
+        yield* Effect.logInfo("plugin hook auto-allowed", { permission: request.permission })
+        return
+      }
+      if (hookResult.status === "deny") {
+        yield* Effect.logInfo("plugin hook denied", { permission: request.permission })
+        return yield* new PermissionV1.DeniedError({
+          ruleset: (input.ruleset ?? []).filter((rule) => Wildcard.match(request.permission, rule.permission)),
+        })
+      }
 
       const id = request.id ?? PermissionV1.ID.ascending()
       const info: PermissionV1.Request = {
@@ -218,6 +265,6 @@ export function visibleTools<T>(tools: Record<string, T>, ruleset: PermissionV1.
   return Object.fromEntries(Object.entries(tools).filter(([name]) => !hidden.has(name)))
 }
 
-export const node = LayerNode.make({ service: Service, layer: layer, deps: [EventV2Bridge.node] })
+export const node = LayerNode.make({ service: Service, layer: layer, deps: [EventV2Bridge.node, Plugin.node] })
 
 export * as Permission from "."
