@@ -358,9 +358,9 @@ function applyCaching(msgs: ModelMessage[], model: Provider.Model): ModelMessage
   const system = msgs.filter((msg) => msg.role === "system").slice(0, 2)
   const final = msgs.filter((msg) => msg.role !== "system").slice(-2)
 
-  const providerOptions = {
+  const cacheOptions = (ttl?: "1h") => ({
     anthropic: {
-      cacheControl: { type: "ephemeral" },
+      cacheControl: { type: "ephemeral", ...(ttl ? { ttl } : {}) },
     },
     openrouter: {
       cacheControl: { type: "ephemeral" },
@@ -377,9 +377,15 @@ function applyCaching(msgs: ModelMessage[], model: Provider.Model): ModelMessage
     alibaba: {
       cacheControl: { type: "ephemeral" },
     },
-  }
+  })
+
+  // The system prefix is stable for the life of a session, so a 1h TTL avoids
+  // re-writing it after idle gaps. Trailing messages change every turn and stay
+  // on the default 5m TTL, where the cheaper write rate wins.
+  const longTtl = new Set<ModelMessage>(system)
 
   for (const msg of unique([...system, ...final])) {
+    const providerOptions = cacheOptions(longTtl.has(msg) ? "1h" : undefined)
     const useMessageLevelOptions =
       model.providerID === "anthropic" ||
       model.providerID.includes("bedrock") ||
